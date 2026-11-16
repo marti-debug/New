@@ -38,7 +38,7 @@
     bFilter: "offen", bSuche: "",
     aFilter: "alle", aSuche: "", aSort: "verkauft30", aAb: true,
     nFilter: "offen",
-    teile: [], teileBereit: false, teileOrt: "", loeschId: null,
+    teile: [], teileBereit: false, teileOrt: "", loeschId: null, bearbeiteId: null,
     entwurf: { titel: "", oe: "", fahrzeug: "", km: "", gruppe: "Motor & Antrieb", stufe: "gut", maengel: "", geprueft: false, lagerplatz: "", neupreis: "", preis: "", versand: "6,99", kosten: "0" },
   };
   try { const z = +localStorage.getItem("cockpit.zeitraum"); if ([7, 30, 90].includes(z)) Z.zeitraum = z; } catch (e) { /* ohne Speicher weiter */ }
@@ -439,12 +439,12 @@
         <td><span class="oe">${esc(t.oe)}</span></td><td>${t.lagerplatz ? `<span class="platz">${esc(t.lagerplatz)}</span>` : ""}</td>
         <td class="z">${r.neupreis ? eur.format(r.neupreis) : "–"}</td><td class="z">${r.preis ? eur.format(r.preis) : "–"}</td><td class="z">${r.preis ? eur.format(r.rest) : "–"}</td>
         <td>${t.status === "eingestellt" ? `<span class="pille gut">Eingestellt</span>` : `<span class="pille">Erfasst</span>`}</td>
-        <td><div class="aktionen">${t.status === "eingestellt" ? "" : `<button class="knopf" data-aktion="t-eingestellt" data-id="${t.id}">Als eingestellt markieren</button>`}<button class="knopf leise" data-aktion="t-laden" data-id="${t.id}">Text</button><button class="knopf leise" data-aktion="t-loeschen" data-id="${t.id}">${Z.loeschId === t.id ? "Wirklich löschen?" : "Löschen"}</button></div></td></tr>`; };
+        <td><div class="aktionen">${t.status === "eingestellt" ? "" : `<button class="knopf" data-aktion="t-eingestellt" data-id="${t.id}">Als eingestellt markieren</button>`}<button class="knopf leise" data-aktion="t-laden" data-id="${t.id}">Bearbeiten</button><button class="knopf leise" data-aktion="t-loeschen" data-id="${t.id}">${Z.loeschId === t.id ? "Wirklich löschen?" : "Löschen"}</button></div></td></tr>`; };
     return `
       <div class="kopf"><div><h1>Teile erfassen</h1><p>Ausgebautes Teil aufnehmen, Preis aus dem Neupreis ableiten, Angebotstext kopieren.</p></div></div>
       <div class="raster gleich">
         <form class="feld" id="teil-form" autocomplete="off">
-          <div class="feld-kopf"><h2>Neues Teil</h2></div>
+          <div class="feld-kopf"><h2>${Z.bearbeiteId ? "Teil bearbeiten" : "Neues Teil"}</h2>${Z.bearbeiteId ? `<span class="pille warn">Sie ändern ein erfasstes Teil</span>` : ""}</div>
           <div class="feld-inhalt formular">
             <div class="breit">${ein("titel", "Bezeichnung", 'required placeholder="z. B. Lichtmaschine 140 A"')}</div>
             ${ein("oe", "OE-Nummer", 'required placeholder="z. B. 06F 903 023 F" class="mono-ein"')}
@@ -459,7 +459,7 @@
             ${ein("versand", "Versandkosten (€)", 'inputmode="decimal"')}
             ${ein("kosten", "Eigene Kosten (€)", 'inputmode="decimal"')}
             ${ein("lagerplatz", "Lagerplatz", 'placeholder="z. B. R2-A1" class="mono-ein"')}
-            <div class="breit aktionen"><button class="knopf" type="submit"${Z.teileBereit ? "" : " disabled"}>Teil speichern</button><span class="hinweis">${esc(Z.teileOrt)}</span></div>
+            <div class="breit aktionen"><button class="knopf" type="submit"${Z.teileBereit ? "" : " disabled"}>${Z.bearbeiteId ? "Änderungen speichern" : "Teil speichern"}</button>${Z.bearbeiteId ? `<button class="knopf leise" type="button" data-aktion="t-abbrechen">Abbrechen</button>` : ""}<span class="hinweis">${esc(Z.teileOrt)}</span></div>
           </div>
         </form>
         <section class="feld">
@@ -472,6 +472,8 @@
         ${!Z.teileBereit ? `<div class="leer">Erfasste Teile werden geladen …</div>` : Z.teile.length ? `<div class="tab-rahmen" style="margin-top:6px"><table><thead><tr><th>Teil</th><th>OE-Nummer</th><th>Lagerplatz</th><th class="z">Neupreis</th><th class="z">Verkaufspreis</th><th class="z">Bleibt übrig</th><th>Status</th><th></th></tr></thead><tbody>${offen.concat(fertig).map(zeile).join("")}</tbody></table></div>` : `<div class="leer">Noch kein Teil erfasst. Füllen Sie oben Bezeichnung und OE-Nummer aus und speichern Sie – das Teil erscheint dann hier.</div>`}
       </section>`;
   }
+
+  function leereEntwurf() { Object.assign(Z.entwurf, { titel: "", oe: "", fahrzeug: "", km: "", maengel: "", geprueft: false, lagerplatz: "", neupreis: "", preis: "" }); }
 
   // Ablage der erfassten Teile: Artifact-Datenbank, sonst der Speicher dieses Browsers.
   const ablage = { db: null };
@@ -542,13 +544,15 @@
       return zeichne();
     }
     const akt = el.dataset.aktion;
+    if (akt === "t-abbrechen") { Z.bearbeiteId = null; leereEntwurf(); return zeichne(); }
     if (akt.startsWith("t-")) {
       const t = Z.teile.find((x) => x.id === el.dataset.id); if (!t) return;
       const { id, ...daten } = t;
-      if (akt === "t-laden") { Object.keys(Z.entwurf).forEach((k) => { if (k in t) Z.entwurf[k] = t[k]; }); zeichne(); window.scrollTo(0, 0); return toast("In das Formular geladen"); }
+      if (akt === "t-laden") { Object.keys(Z.entwurf).forEach((k) => { if (k in t) Z.entwurf[k] = t[k]; }); Z.bearbeiteId = id; zeichne(); window.scrollTo(0, 0); return; }
       if (akt === "t-eingestellt") return void teilSchreiben(id, { ...daten, status: "eingestellt" }).then((ok) => ok && toast("Als eingestellt markiert"));
       if (Z.loeschId !== id) { Z.loeschId = id; return zeichne(); }
-      Z.loeschId = null; return void teilSchreiben(id, null, true).then((ok) => ok && toast("Teil gelöscht"));
+      Z.loeschId = null; if (Z.bearbeiteId === id) { Z.bearbeiteId = null; leereEntwurf(); }
+      return void teilSchreiben(id, null, true).then((ok) => ok && toast("Teil gelöscht"));
     }
     if (akt === "versendet" || akt === "erstattet") {
       const b = D.bestellungen.find((x) => x.nr === el.dataset.nr);
@@ -576,10 +580,12 @@
     ev.preventDefault();
     const e = Z.entwurf;
     if (!e.titel.trim() || !e.oe.trim()) return toast("Bitte Bezeichnung und OE-Nummer ausfüllen");
-    teilSchreiben("t" + Date.now(), { ...e, status: "erfasst", angelegt: Date.now() }).then((ok) => {
+    const alt = Z.bearbeiteId && Z.teile.find((t) => t.id === Z.bearbeiteId);
+    const id = alt ? alt.id : "t" + Date.now();
+    teilSchreiben(id, { ...e, status: alt ? alt.status : "erfasst", angelegt: alt ? alt.angelegt : Date.now() }).then((ok) => {
       if (!ok) return;
-      Object.assign(e, { titel: "", oe: "", km: "", maengel: "", geprueft: false, lagerplatz: "", neupreis: "", preis: "" });
-      toast("Teil gespeichert"); zeichne();
+      Z.bearbeiteId = null; leereEntwurf();
+      toast(alt ? "Änderungen gespeichert" : "Teil gespeichert"); zeichne();
     });
   });
   window.addEventListener("hashchange", route);
