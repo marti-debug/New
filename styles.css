@@ -239,7 +239,7 @@ details.tabelle summary { cursor: pointer; color: var(--text-2); }
 .formular { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
 .formular .breit { grid-column: 1 / -1; }
 .feldname { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 4px; }
-.formular input:not([type="checkbox"]), .formular select, .formular textarea, .kopier input, .kopier textarea {
+.formular input:not([type="checkbox"]):not([type="file"]), .formular select, .formular textarea, .kopier input, .kopier textarea {
   width: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius); padding: 7px 10px; resize: vertical;
 }
 .kopier input, .kopier textarea { background: var(--surface-2); }
@@ -256,6 +256,18 @@ details.tabelle summary { cursor: pointer; color: var(--text-2); }
 .kopier { display: flex; gap: 8px; align-items: flex-start; }
 .kopier > :first-child { flex: 1; min-width: 0; }
 @media (max-width: 520px) { .formular { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Fotos ---------- */
+.fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.fotos figure { margin: 0; display: grid; gap: 4px; }
+.fotos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-2); }
+.fotos figcaption { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.link { all: unset; cursor: pointer; font-size: 12.5px; color: var(--accent); text-decoration: underline; }
+.link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.unsichtbar { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.lese-hinweis { margin: 8px 0 0; padding: 8px 10px; font-size: 13.5px; border-radius: var(--radius); background: var(--accent-soft); color: var(--text); }
+.mit-bild { display: flex; gap: 10px; align-items: flex-start; }
+.mini { width: 44px; height: 44px; flex: none; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); background: var(--surface-2); }
 
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%);

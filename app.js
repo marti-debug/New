@@ -39,7 +39,8 @@
     aFilter: "alle", aSuche: "", aSort: "verkauft30", aAb: true,
     nFilter: "offen",
     teile: [], teileBereit: false, teileOrt: "", loeschId: null, bearbeiteId: null,
-    entwurf: { titel: "", oe: "", fahrzeug: "", km: "", gruppe: "Motor & Antrieb", stufe: "gut", maengel: "", geprueft: false, lagerplatz: "", neupreis: "", preis: "", versand: "6,99", kosten: "0" },
+    neueFotos: [], fotoWeg: [], liest: false, leseHinweis: "", speichert: false,
+    entwurf: { titel: "", oe: "", fahrzeug: "", km: "", gruppe: "Motor & Antrieb", stufe: "gut", maengel: "", geprueft: false, lagerplatz: "", neupreis: "", preis: "", versand: "6,99", kosten: "0", fotos: [] },
   };
   try { const z = +localStorage.getItem("cockpit.zeitraum"); if ([7, 30, 90].includes(z)) Z.zeitraum = z; } catch (e) { /* ohne Speicher weiter */ }
 
@@ -435,7 +436,7 @@
     const ein = (id, name, attr = "") => `<div><label class="feldname" for="t-${id}">${name}</label><input id="t-${id}" data-feld="${id}" value="${esc(e[id])}" ${attr}></div>`;
     const offen = Z.teile.filter((t) => t.status !== "eingestellt"), fertig = Z.teile.filter((t) => t.status === "eingestellt");
     const zeile = (t) => { const r = rechne(t); return `<tr>
-        <td><div class="art-titel">${esc(t.titel)}</div><div class="art-sub">${esc(t.fahrzeug)}${t.maengel ? " · " + esc(t.maengel) : ""}</div></td>
+        <td><div class="mit-bild">${(t.fotos || []).length ? `<img class="mini" src="/_blob/${esc(t.fotos[0])}" alt="" loading="lazy">` : ""}<div><div class="art-titel">${esc(t.titel)}</div><div class="art-sub">${esc(t.fahrzeug)}${t.maengel ? " · " + esc(t.maengel) : ""}${(t.fotos || []).length ? " · " + t.fotos.length + (t.fotos.length === 1 ? " Foto" : " Fotos") : ""}</div></div></div></td>
         <td><span class="oe">${esc(t.oe)}</span></td><td>${t.lagerplatz ? `<span class="platz">${esc(t.lagerplatz)}</span>` : ""}</td>
         <td class="z">${r.neupreis ? eur.format(r.neupreis) : "–"}</td><td class="z">${r.preis ? eur.format(r.preis) : "–"}</td><td class="z">${r.preis ? eur.format(r.rest) : "–"}</td>
         <td>${t.status === "eingestellt" ? `<span class="pille gut">Eingestellt</span>` : `<span class="pille">Erfasst</span>`}</td>
@@ -454,12 +455,13 @@
             <div class="breit"><label class="feldname" for="t-stufe">Zustand</label><select id="t-stufe" data-feld="stufe">${Object.entries(STUFEN).map(([k, v]) => `<option value="${k}"${k === e.stufe ? " selected" : ""}>${v[0]}</option>`).join("")}</select></div>
             <div class="breit"><label class="feldname" for="t-maengel">Optische Mängel</label><textarea id="t-maengel" data-feld="maengel" rows="2" placeholder="z. B. Kratzer am Gehäuse, Halter leicht korrodiert.">${esc(e.maengel)}</textarea></div>
             <label class="haken breit"><input type="checkbox" id="t-geprueft" data-feld="geprueft"${e.geprueft ? " checked" : ""}> Funktion in der Werkstatt geprüft</label>
+            <div class="breit"><span class="feldname">Fotos</span><div id="fotos">${fotosHtml()}</div></div>
             ${ein("neupreis", "Neupreis Original laut PartsLink24 (€)", 'inputmode="decimal" placeholder="z. B. 389,00"')}
             ${ein("preis", "Eigener Verkaufspreis (€, optional)", 'inputmode="decimal" placeholder="leer = Vorschlag"')}
             ${ein("versand", "Versandkosten (€)", 'inputmode="decimal"')}
             ${ein("kosten", "Eigene Kosten (€)", 'inputmode="decimal"')}
             ${ein("lagerplatz", "Lagerplatz", 'placeholder="z. B. R2-A1" class="mono-ein"')}
-            <div class="breit aktionen"><button class="knopf" type="submit"${Z.teileBereit ? "" : " disabled"}>${Z.bearbeiteId ? "Änderungen speichern" : "Teil speichern"}</button>${Z.bearbeiteId ? `<button class="knopf leise" type="button" data-aktion="t-abbrechen">Abbrechen</button>` : ""}<span class="hinweis">${esc(Z.teileOrt)}</span></div>
+            <div class="breit aktionen"><button class="knopf" type="submit"${Z.teileBereit && !Z.speichert ? "" : " disabled"}>${Z.bearbeiteId ? "Änderungen speichern" : "Teil speichern"}</button>${Z.bearbeiteId ? `<button class="knopf leise" type="button" data-aktion="t-abbrechen">Abbrechen</button>` : ""}<span class="hinweis">${esc(Z.teileOrt)}</span></div>
           </div>
         </form>
         <section class="feld">
@@ -473,7 +475,89 @@
       </section>`;
   }
 
-  function leereEntwurf() { Object.assign(Z.entwurf, { titel: "", oe: "", fahrzeug: "", km: "", maengel: "", geprueft: false, lagerplatz: "", neupreis: "", preis: "" }); }
+  function leereEntwurf() {
+    Z.neueFotos.forEach((f) => URL.revokeObjectURL(f.url)); Z.neueFotos = []; Z.fotoWeg = []; Z.leseHinweis = "";
+    Object.assign(Z.entwurf, { fotos: [], titel: "", oe: "", fahrzeug: "", km: "", maengel: "", geprueft: false, lagerplatz: "", neupreis: "", preis: "" });
+  }
+
+  // ---------- Fotos ----------
+  const kann = { assets: null, sample: null, bilder: null, downloads: null };
+  const MAX_FOTOS = 8;
+  const behalteneFotos = () => Z.entwurf.fotos.filter((id) => !Z.fotoWeg.includes(id));
+  function fotosHtml() {
+    const alt = behalteneFotos(), anzahl = alt.length + Z.neueFotos.length;
+    const bild = (src, knoepfe) => `<figure><img src="${src}" alt="Foto des Teils"><figcaption>${knoepfe}</figcaption></figure>`;
+    return `
+      ${anzahl ? `<div class="fotos">${alt.map((id) => bild("/_blob/" + esc(id), `${kann.downloads ? `<button type="button" class="link" data-foto="laden" data-id="${esc(id)}">Herunterladen</button>` : ""}<button type="button" class="link" data-foto="weg" data-id="${esc(id)}">Entfernen</button>`)).join("")}${Z.neueFotos.map((f, i) => bild(f.url, `<button type="button" class="link" data-foto="neu-weg" data-id="${i}">Entfernen</button>`)).join("")}</div>` : ""}
+      <div class="aktionen">
+        <button type="button" class="knopf leise" data-foto="waehlen"${anzahl >= MAX_FOTOS ? " disabled" : ""}>Fotos hinzufügen</button>
+        <input type="file" id="t-foto" accept="image/*" multiple class="unsichtbar" tabindex="-1" aria-hidden="true">
+        ${kann.bilder && anzahl ? `<button type="button" class="knopf leise" data-foto="lesen"${Z.liest ? " disabled" : ""}>${Z.liest ? "Fotos werden gelesen …" : "Felder aus Fotos ausfüllen"}</button>` : ""}
+        <span class="hinweis">${anzahl} von ${MAX_FOTOS}${Z.teileBereit && !kann.assets ? " · Fotos werden in dieser Ansicht nicht gespeichert." : ""}</span>
+      </div>
+      ${Z.leseHinweis ? `<p class="lese-hinweis">${esc(Z.leseHinweis)}</p>` : ""}`;
+  }
+  function zeichneFotos() { const el = document.getElementById("fotos"); if (el) el.innerHTML = fotosHtml(); }
+  // Handyfotos sind mehrere MB groß: vor dem Speichern auf 1600 px Kantenlänge verkleinern.
+  async function verkleinere(datei) {
+    try {
+      const bmp = await createImageBitmap(datei), f = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement("canvas"); c.width = Math.round(bmp.width * f); c.height = Math.round(bmp.height * f);
+      c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+      const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85));
+      return blob || datei;
+    } catch (e) { return datei; }
+  }
+  async function fotosDazu(dateien) {
+    const frei = MAX_FOTOS - behalteneFotos().length - Z.neueFotos.length;
+    const bilder = [...dateien].filter((d) => d.type.startsWith("image/"));
+    if (bilder.length > frei) toast("Höchstens " + MAX_FOTOS + " Fotos je Teil");
+    for (const d of bilder.slice(0, Math.max(0, frei))) { const blob = await verkleinere(d); Z.neueFotos.push({ blob, url: URL.createObjectURL(blob) }); }
+    zeichneFotos();
+  }
+  const holeFoto = (id) => fetch("/_blob/" + id).then((r) => { if (!r.ok) throw new Error("fehlt"); return r.blob(); });
+  async function leseFotos() {
+    if (!kann.sample || !kann.bilder || Z.liest) return;
+    Z.liest = true; Z.leseHinweis = ""; zeichneFotos();
+    try {
+      const blobs = Z.neueFotos.map((f) => f.blob);
+      for (const id of behalteneFotos()) { try { blobs.push(await holeFoto(id)); } catch (e) { /* Foto überspringen */ } }
+      const r = await kann.sample.json(
+        "Die Fotos zeigen ein gebrauchtes, ausgebautes Kfz-Teil aus einer Werkstatt. Lies ab, was auf Typenschild, Aufkleber oder Prägung steht, und beschreibe die sichtbaren optischen Mängel. " +
+        "Rate nichts: Was nicht eindeutig lesbar ist, bleibt ein leerer Text. Die OE-Nummer ist die Teilenummer des Fahrzeugherstellers, nicht die eines Zulieferers. " +
+        'Antworte nur mit einem JSON-Objekt in dieser Form: {"bezeichnung": "Lichtmaschine 140 A", "oe_nummer": "06F 903 023 F", "weitere_nummern": ["0 124 525 091"], "maengel": "Ein kurzer Satz zu Kratzern, Korrosion, Brüchen.", "unsicher": "Was schlecht lesbar war, sonst leer."}',
+        { images: blobs.slice(0, kann.bilder.maxCount || 4) });
+      const txt = (x) => (typeof x === "string" ? x.trim() : "");
+      const e = Z.entwurf, gefuellt = [];
+      if (txt(r && r.bezeichnung) && !e.titel.trim()) { e.titel = txt(r.bezeichnung); gefuellt.push("Bezeichnung"); }
+      if (txt(r && r.oe_nummer) && !e.oe.trim()) { e.oe = txt(r.oe_nummer); gefuellt.push("OE-Nummer"); }
+      if (txt(r && r.maengel) && !e.maengel.trim()) { e.maengel = txt(r.maengel); gefuellt.push("Mängel"); }
+      const weitere = Array.isArray(r && r.weitere_nummern) ? r.weitere_nummern.map(txt).filter(Boolean).slice(0, 6) : [];
+      Z.leseHinweis = (gefuellt.length ? "Aus den Fotos ausgefüllt: " + gefuellt.join(", ") + "." : "Nichts ausgefüllt – entweder war nichts eindeutig lesbar, oder die Felder waren schon belegt.") +
+        (txt(r && r.oe_nummer) && !gefuellt.includes("OE-Nummer") ? " Gelesene OE-Nummer: " + txt(r.oe_nummer) + "." : "") +
+        (weitere.length ? " Weitere Nummern auf dem Teil: " + weitere.join(", ") + "." : "") +
+        (txt(r && r.unsicher) ? " Unsicher: " + txt(r.unsicher) : "") + " Bitte Nummern am Teil gegenprüfen.";
+    } catch (err) {
+      const code = err && err.code;
+      if (code === "not_granted" || code === "images_unavailable") { kann.bilder = null; toast("Auslesen ist in dieser Ansicht nicht verfügbar"); }
+      else if (code === "rate_limited") toast("Zu viele Anfragen. Bitte kurz warten.");
+      else toast("Auslesen fehlgeschlagen. Bitte von Hand ausfüllen.");
+    }
+    Z.liest = false;
+    if (Z.bereich === "teile") zeichne();
+  }
+  async function fotoLaden(id) {
+    try {
+      const nr = (Z.entwurf.oe.trim() || "teil").replace(/[^A-Za-z0-9]+/g, "-");
+      await kann.downloads.save({ filename: nr + "-foto-" + (Z.entwurf.fotos.indexOf(id) + 1) + ".jpg", data: await holeFoto(id) });
+    } catch (e) { if (!e || e.code !== "declined") toast("Foto konnte nicht gespeichert werden"); }
+  }
+  async function starteFotos() {
+    const use = window.claude && window.claude.use ? (n) => window.claude.use(n).catch(() => null) : () => Promise.resolve(null);
+    [kann.assets, kann.sample, kann.downloads] = await Promise.all([use("assets"), use("sample"), use("downloads")]);
+    if (kann.sample) { const g = await kann.sample.limits().catch(() => null); kann.bilder = (g && g.images) || null; }
+    zeichneFotos();
+  }
 
   // Ablage der erfassten Teile: Artifact-Datenbank, sonst der Speicher dieses Browsers.
   const ablage = { db: null };
@@ -495,6 +579,7 @@
       if (Z.bereich === "teile") { const f = document.activeElement && document.activeElement.id; zeichne(f && f.startsWith("t-") ? f : null); } else zeichneNav();
     }, () => { clearTimeout(notfall); if (!Z.teileBereit) { ablage.db = null; starteLokal(); } });
   }
+  function loescheFotos(ids) { if (kann.assets) ids.forEach((id) => kann.assets.delete(id).catch(() => {})); }
   async function teilSchreiben(id, daten, loeschen) {
     try {
       if (ablage.db) {
@@ -524,8 +609,17 @@
   }
 
   document.addEventListener("click", (ev) => {
-    const el = ev.target.closest("[data-chip],[data-sort],[data-aktion],[data-setze],[data-kopiere]");
+    const el = ev.target.closest("[data-chip],[data-sort],[data-aktion],[data-setze],[data-kopiere],[data-foto]");
     if (!el) return;
+    if (el.dataset.foto) {
+      const f = el.dataset.foto, id = el.dataset.id;
+      if (f === "waehlen") return document.getElementById("t-foto").click();
+      if (f === "lesen") return void leseFotos();
+      if (f === "laden") return void fotoLaden(id);
+      if (f === "weg") Z.fotoWeg.push(id);
+      if (f === "neu-weg") { const [raus] = Z.neueFotos.splice(+id, 1); if (raus) URL.revokeObjectURL(raus.url); }
+      return zeichneFotos();
+    }
     if (el.dataset.kopiere) {
       const feld = document.getElementById(el.dataset.kopiere);
       const markiere = () => { feld.focus(); feld.select(); toast("Text markiert – mit Strg+C kopieren"); };
@@ -548,11 +642,11 @@
     if (akt.startsWith("t-")) {
       const t = Z.teile.find((x) => x.id === el.dataset.id); if (!t) return;
       const { id, ...daten } = t;
-      if (akt === "t-laden") { Object.keys(Z.entwurf).forEach((k) => { if (k in t) Z.entwurf[k] = t[k]; }); Z.bearbeiteId = id; zeichne(); window.scrollTo(0, 0); return; }
+      if (akt === "t-laden") { leereEntwurf(); Object.keys(Z.entwurf).forEach((k) => { if (k in t) Z.entwurf[k] = Array.isArray(t[k]) ? t[k].slice() : t[k]; }); Z.bearbeiteId = id; zeichne(); window.scrollTo(0, 0); return; }
       if (akt === "t-eingestellt") return void teilSchreiben(id, { ...daten, status: "eingestellt" }).then((ok) => ok && toast("Als eingestellt markiert"));
       if (Z.loeschId !== id) { Z.loeschId = id; return zeichne(); }
       Z.loeschId = null; if (Z.bearbeiteId === id) { Z.bearbeiteId = null; leereEntwurf(); }
-      return void teilSchreiben(id, null, true).then((ok) => ok && toast("Teil gelöscht"));
+      return void teilSchreiben(id, null, true).then((ok) => { if (!ok) return; loescheFotos(t.fotos || []); toast("Teil gelöscht"); });
     }
     if (akt === "versendet" || akt === "erstattet") {
       const b = D.bestellungen.find((x) => x.nr === el.dataset.nr);
@@ -575,22 +669,36 @@
       const v = document.getElementById("vorschau"); if (v) v.innerHTML = vorschauHtml(Z.entwurf);
     }
   });
+  document.addEventListener("change", (ev) => {
+    if (ev.target.id === "t-foto") { const d = [...ev.target.files]; ev.target.value = ""; fotosDazu(d); }
+  });
   document.addEventListener("submit", (ev) => {
     if (ev.target.id !== "teil-form") return;
     ev.preventDefault();
     const e = Z.entwurf;
     if (!e.titel.trim() || !e.oe.trim()) return toast("Bitte Bezeichnung und OE-Nummer ausfüllen");
+    if (Z.speichert) return;
     const alt = Z.bearbeiteId && Z.teile.find((t) => t.id === Z.bearbeiteId);
     const id = alt ? alt.id : "t" + Date.now();
-    teilSchreiben(id, { ...e, status: alt ? alt.status : "erfasst", angelegt: alt ? alt.angelegt : Date.now() }).then((ok) => {
-      if (!ok) return;
-      Z.bearbeiteId = null; leereEntwurf();
-      toast(alt ? "Änderungen gespeichert" : "Teil gespeichert"); zeichne();
-    });
+    Z.speichert = true; zeichne();
+    (async () => {
+      const fotos = behalteneFotos(), weg = Z.fotoWeg.slice();
+      if (kann.assets) {
+        try { for (const f of Z.neueFotos) fotos.push((await kann.assets.upload(f.blob, { type: "image/jpeg" })).id); }
+        catch (err) { toast("Fotos konnten nicht gespeichert werden. Bitte erneut versuchen."); return false; }
+      }
+      const ok = await teilSchreiben(id, { ...e, fotos, status: alt ? alt.status : "erfasst", angelegt: alt ? alt.angelegt : Date.now() });
+      if (!ok) return false;
+      const ohneFotos = Z.neueFotos.length && !kann.assets;
+      loescheFotos(weg); Z.bearbeiteId = null; leereEntwurf();
+      toast(ohneFotos ? "Teil gespeichert, Fotos nicht" : alt ? "Änderungen gespeichert" : "Teil gespeichert");
+      return true;
+    })().then(() => { Z.speichert = false; zeichne(); });
   });
   window.addEventListener("hashchange", route);
 
   document.getElementById("demo-hinweis").hidden = !D.istDemo;
   route();
   starteAblage();
+  starteFotos();
 })();

@@ -5,7 +5,7 @@ Ein Cockpit für den eBay-Verkauf von Kfz-Teilen. Läuft ohne Installation: `ind
 ## Bereiche
 
 - **Übersicht** – Kennzahlen, Aufgaben des Tages, Verkäuferstatus, Verlauf der letzten 30 Tage
-- **Teile erfassen** – ausgebautes Teil aufnehmen, Preis aus dem Neupreis (PartsLink24) ableiten, Angebotstitel und Beschreibung kopieren
+- **Teile erfassen** – ausgebautes Teil aufnehmen, Fotos hinzufügen und Felder daraus vorausfüllen lassen, Preis aus dem Neupreis (PartsLink24) ableiten, Angebotstitel und Beschreibung kopieren
 - **Umsatz & Gewinn** – Gewinn nach Wareneinsatz, Gebühren, Versand und Anzeigen; Auswertung je Artikel und Teilegruppe (7/30/90 Tage)
 - **Bestellungen & Versand** – offene Sendungen nach Versandfrist, Rückgaben, Suche nach Bestellnummer, Käufer oder OE-Nummer
 - **Angebote & Lager** – Bestand, Reichweite, Ladenhüter, Marge, Lagerplatz, Aufrufe und Beobachter
