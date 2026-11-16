@@ -30,7 +30,7 @@
 
   // ---------- Zustand ----------
   const BEREICHE = [
-    ["uebersicht", "Übersicht"], ["finanzen", "Umsatz & Gewinn"], ["bestellungen", "Bestellungen & Versand"],
+    ["uebersicht", "Übersicht"], ["teile", "Teile erfassen"], ["finanzen", "Umsatz & Gewinn"], ["bestellungen", "Bestellungen & Versand"],
     ["angebote", "Angebote & Lager"], ["nachrichten", "Nachrichten & Bewertungen"],
   ];
   const Z = {
@@ -38,6 +38,8 @@
     bFilter: "offen", bSuche: "",
     aFilter: "alle", aSuche: "", aSort: "verkauft30", aAb: true,
     nFilter: "offen",
+    teile: [], teileBereit: false, teileOrt: "", loeschId: null,
+    entwurf: { titel: "", oe: "", fahrzeug: "", km: "", gruppe: "Motor & Antrieb", stufe: "gut", maengel: "", geprueft: false, lagerplatz: "", neupreis: "", preis: "", versand: "6,99", kosten: "0" },
   };
   try { const z = +localStorage.getItem("cockpit.zeitraum"); if ([7, 30, 90].includes(z)) Z.zeitraum = z; } catch (e) { /* ohne Speicher weiter */ }
 
@@ -103,6 +105,7 @@
     const marken = {
       bestellungen: offen ? `<span class="zaehler${ueber ? " dringend" : ""}">${offen}</span>` : "",
       angebote: (() => { const n = zaehle(D.angebote, aGruppen.knapp) + zaehle(D.angebote, aGruppen.leer); return n ? `<span class="zaehler">${n}</span>` : ""; })(),
+      teile: (() => { const n = zaehle(Z.teile, (t) => t.status !== "eingestellt"); return n ? `<span class="zaehler">${n}</span>` : ""; })(),
       nachrichten: (() => { const n = offeneNachrichten() + offeneVorschlaege(); return n ? `<span class="zaehler">${n}</span>` : ""; })(),
     };
     document.getElementById("nav").innerHTML = BEREICHE.map(([id, name]) =>
@@ -383,8 +386,127 @@
       </div>`;
   }
 
+  // ---------- Teile erfassen ----------
+  const STUFEN = { sehrgut: ["Sehr gut, kaum Gebrauchsspuren", 0.6], gut: ["Gut, leichte optische Mängel", 0.5], maengel: ["Deutliche optische Mängel", 0.35] };
+  const GRUPPEN = ["Motor & Antrieb", "Elektrik", "Bremsen", "Beleuchtung", "Fahrwerk", "Karosserie", "Innenraum", "Sonstiges"];
+  const dez = (s) => { const x = parseFloat(String(s).replace(/\./g, "").replace(",", ".")); return isFinite(x) ? x : 0; };
+  function rechne(e) {
+    const neupreis = dez(e.neupreis), vorschlag = neupreis ? Math.round(neupreis * STUFEN[e.stufe][1]) : 0;
+    const preis = dez(e.preis) || vorschlag;
+    const gebuehr = preis ? preis * D.annahmen.gebuehrProzent + D.annahmen.gebuehrFix : 0;
+    const rest = preis - gebuehr - dez(e.versand) - dez(e.kosten);
+    return { neupreis, vorschlag, preis, gebuehr, rest };
+  }
+  function angebotsTitel(e) {
+    // eBay erlaubt 80 Zeichen: Bausteine nach Wichtigkeit aufnehmen, nie mitten im Wort kürzen.
+    const teile = [e.titel.trim().slice(0, 80)];
+    for (const x of [e.oe, "Original", e.fahrzeug, "gebraucht"]) { const t = x.trim(); if (t && (teile.join(" ") + " " + t).length <= 80) teile.push(t); }
+    return teile.join(" ");
+  }
+  function angebotsText(e) {
+    const z = [e.titel.trim() + (e.fahrzeug.trim() ? " für " + e.fahrzeug.trim() : ""), ""];
+    if (e.oe.trim()) z.push("OE-Nummer: " + e.oe.trim());
+    if (e.fahrzeug.trim()) z.push("Ausgebaut aus: " + e.fahrzeug.trim() + (e.km.trim() ? ", Laufleistung " + e.km.trim() + " km" : ""));
+    z.push("Zustand: gebrauchtes Originalteil" + (e.geprueft ? ", Funktion in unserer Werkstatt geprüft" : "") + ".");
+    z.push("Optische Mängel: " + (e.maengel.trim() || "keine besonderen, übliche Gebrauchsspuren") + " Siehe Fotos.");
+    z.push("", "Bitte vergleichen Sie vor dem Kauf die OE-Nummer mit der Nummer auf Ihrem Altteil.");
+    return z.join("\n");
+  }
+  function vorschauHtml(e) {
+    const r = rechne(e), titel = angebotsTitel(e);
+    return `
+      <div class="rechnung">
+        <div><span>Neupreis Original</span><span>${r.neupreis ? eur.format(r.neupreis) : "–"}</span></div>
+        <div><span>Preisvorschlag (${pct(STUFEN[e.stufe][1], 0)} vom Neupreis)</span><span>${r.vorschlag ? eur.format(r.vorschlag) : "–"}</span></div>
+        <div class="stark"><span>Ihr Verkaufspreis</span><span>${r.preis ? eur.format(r.preis) : "–"}</span></div>
+        <div><span>eBay-Gebühr</span><span>${r.preis ? "− " + eur.format(r.gebuehr) : "–"}</span></div>
+        <div><span>Versand</span><span>− ${eur.format(dez(e.versand))}</span></div>
+        <div><span>Eigene Kosten</span><span>− ${eur.format(dez(e.kosten))}</span></div>
+        <div class="stark"><span>Bleibt übrig</span><span>${r.preis ? eur.format(r.rest) + " " + margePille(r.rest / r.preis) : "–"}</span></div>
+      </div>
+      <p class="hinweis">Der Vorschlag ist eine Faustregel. Prüfen Sie bei eBay unter „Verkaufte Artikel“, was das Teil tatsächlich bringt.</p>
+      <label class="feldname" for="aus-titel">Angebotstitel <span class="hinweis">${titel.length} von 80 Zeichen</span></label>
+      <div class="kopier"><input id="aus-titel" readonly value="${esc(titel)}"><button type="button" class="knopf leise" data-kopiere="aus-titel">Kopieren</button></div>
+      <label class="feldname" for="aus-text">Beschreibung</label>
+      <div class="kopier"><textarea id="aus-text" readonly rows="8">${esc(angebotsText(e))}</textarea><button type="button" class="knopf leise" data-kopiere="aus-text">Kopieren</button></div>`;
+  }
+  function ansichtTeile() {
+    const e = Z.entwurf;
+    const ein = (id, name, attr = "") => `<div><label class="feldname" for="t-${id}">${name}</label><input id="t-${id}" data-feld="${id}" value="${esc(e[id])}" ${attr}></div>`;
+    const offen = Z.teile.filter((t) => t.status !== "eingestellt"), fertig = Z.teile.filter((t) => t.status === "eingestellt");
+    const zeile = (t) => { const r = rechne(t); return `<tr>
+        <td><div class="art-titel">${esc(t.titel)}</div><div class="art-sub">${esc(t.fahrzeug)}${t.maengel ? " · " + esc(t.maengel) : ""}</div></td>
+        <td><span class="oe">${esc(t.oe)}</span></td><td>${t.lagerplatz ? `<span class="platz">${esc(t.lagerplatz)}</span>` : ""}</td>
+        <td class="z">${r.neupreis ? eur.format(r.neupreis) : "–"}</td><td class="z">${r.preis ? eur.format(r.preis) : "–"}</td><td class="z">${r.preis ? eur.format(r.rest) : "–"}</td>
+        <td>${t.status === "eingestellt" ? `<span class="pille gut">Eingestellt</span>` : `<span class="pille">Erfasst</span>`}</td>
+        <td><div class="aktionen">${t.status === "eingestellt" ? "" : `<button class="knopf" data-aktion="t-eingestellt" data-id="${t.id}">Als eingestellt markieren</button>`}<button class="knopf leise" data-aktion="t-laden" data-id="${t.id}">Text</button><button class="knopf leise" data-aktion="t-loeschen" data-id="${t.id}">${Z.loeschId === t.id ? "Wirklich löschen?" : "Löschen"}</button></div></td></tr>`; };
+    return `
+      <div class="kopf"><div><h1>Teile erfassen</h1><p>Ausgebautes Teil aufnehmen, Preis aus dem Neupreis ableiten, Angebotstext kopieren.</p></div></div>
+      <div class="raster gleich">
+        <form class="feld" id="teil-form" autocomplete="off">
+          <div class="feld-kopf"><h2>Neues Teil</h2></div>
+          <div class="feld-inhalt formular">
+            <div class="breit">${ein("titel", "Bezeichnung", 'required placeholder="z. B. Lichtmaschine 140 A"')}</div>
+            ${ein("oe", "OE-Nummer", 'required placeholder="z. B. 06F 903 023 F" class="mono-ein"')}
+            ${ein("fahrzeug", "Ausgebaut aus", 'placeholder="z. B. VW Golf VI 2.0 TDI, Bj. 2010"')}
+            ${ein("km", "Laufleistung (km)", 'inputmode="numeric" placeholder="z. B. 148.000"')}
+            <div><label class="feldname" for="t-gruppe">Teilegruppe</label><select id="t-gruppe" data-feld="gruppe">${GRUPPEN.map((g) => `<option${g === e.gruppe ? " selected" : ""}>${g}</option>`).join("")}</select></div>
+            <div class="breit"><label class="feldname" for="t-stufe">Zustand</label><select id="t-stufe" data-feld="stufe">${Object.entries(STUFEN).map(([k, v]) => `<option value="${k}"${k === e.stufe ? " selected" : ""}>${v[0]}</option>`).join("")}</select></div>
+            <div class="breit"><label class="feldname" for="t-maengel">Optische Mängel</label><textarea id="t-maengel" data-feld="maengel" rows="2" placeholder="z. B. Kratzer am Gehäuse, Halter leicht korrodiert.">${esc(e.maengel)}</textarea></div>
+            <label class="haken breit"><input type="checkbox" id="t-geprueft" data-feld="geprueft"${e.geprueft ? " checked" : ""}> Funktion in der Werkstatt geprüft</label>
+            ${ein("neupreis", "Neupreis Original laut PartsLink24 (€)", 'inputmode="decimal" placeholder="z. B. 389,00"')}
+            ${ein("preis", "Eigener Verkaufspreis (€, optional)", 'inputmode="decimal" placeholder="leer = Vorschlag"')}
+            ${ein("versand", "Versandkosten (€)", 'inputmode="decimal"')}
+            ${ein("kosten", "Eigene Kosten (€)", 'inputmode="decimal"')}
+            ${ein("lagerplatz", "Lagerplatz", 'placeholder="z. B. R2-A1" class="mono-ein"')}
+            <div class="breit aktionen"><button class="knopf" type="submit"${Z.teileBereit ? "" : " disabled"}>Teil speichern</button><span class="hinweis">${esc(Z.teileOrt)}</span></div>
+          </div>
+        </form>
+        <section class="feld">
+          <div class="feld-kopf"><h2>Preis und Angebotstext</h2></div>
+          <div class="feld-inhalt" id="vorschau">${vorschauHtml(e)}</div>
+        </section>
+      </div>
+      <section class="feld">
+        <div class="feld-kopf"><h2>Erfasste Teile</h2><span class="hinweis">${offen.length} noch nicht eingestellt · ${fertig.length} eingestellt</span></div>
+        ${!Z.teileBereit ? `<div class="leer">Erfasste Teile werden geladen …</div>` : Z.teile.length ? `<div class="tab-rahmen" style="margin-top:6px"><table><thead><tr><th>Teil</th><th>OE-Nummer</th><th>Lagerplatz</th><th class="z">Neupreis</th><th class="z">Verkaufspreis</th><th class="z">Bleibt übrig</th><th>Status</th><th></th></tr></thead><tbody>${offen.concat(fertig).map(zeile).join("")}</tbody></table></div>` : `<div class="leer">Noch kein Teil erfasst. Füllen Sie oben Bezeichnung und OE-Nummer aus und speichern Sie – das Teil erscheint dann hier.</div>`}
+      </section>`;
+  }
+
+  // Ablage der erfassten Teile: Artifact-Datenbank, sonst der Speicher dieses Browsers.
+  const ablage = { db: null };
+  const sortiere = () => Z.teile.sort((a, b) => (b.angelegt || 0) - (a.angelegt || 0));
+  function lokalSichern() { try { localStorage.setItem("cockpit.teile", JSON.stringify(Z.teile)); } catch (e) { toast("Speichern im Browser nicht möglich"); } }
+  function starteLokal() {
+    try { Z.teile = JSON.parse(localStorage.getItem("cockpit.teile") || "[]"); } catch (e) { Z.teile = []; }
+    sortiere(); Z.teileBereit = true; Z.teileOrt = "Wird nur in diesem Browser gespeichert."; if (Z.bereich === "teile") zeichne(); else zeichneNav();
+  }
+  async function starteAblage() {
+    const db = window.claude && window.claude.use ? await window.claude.use("db").catch(() => null) : null;
+    if (!db) return starteLokal();
+    ablage.db = db;
+    const notfall = setTimeout(() => { if (!Z.teileBereit) { ablage.db = null; starteLokal(); } }, 10000);
+    db.collection("teile").onSnapshot((snap) => {
+      clearTimeout(notfall);
+      Z.teile = snap.docs.map((d) => ({ ...d.data(), id: d.id })); sortiere();
+      Z.teileBereit = true; Z.teileOrt = "";
+      if (Z.bereich === "teile") { const f = document.activeElement && document.activeElement.id; zeichne(f && f.startsWith("t-") ? f : null); } else zeichneNav();
+    }, () => { clearTimeout(notfall); if (!Z.teileBereit) { ablage.db = null; starteLokal(); } });
+  }
+  async function teilSchreiben(id, daten, loeschen) {
+    try {
+      if (ablage.db) {
+        const ref = ablage.db.collection("teile").doc(id);
+        if (loeschen) await ref.delete(); else await ref.set(daten);
+      } else {
+        Z.teile = Z.teile.filter((t) => t.id !== id); if (!loeschen) Z.teile.push({ ...daten, id }); sortiere(); lokalSichern(); zeichne();
+      }
+      return true;
+    } catch (e) { toast("Speichern fehlgeschlagen. Bitte erneut versuchen."); return false; }
+  }
+
   // ---------- Zeichnen & Ereignisse ----------
-  const ANSICHTEN = { uebersicht: ansichtUebersicht, finanzen: ansichtFinanzen, bestellungen: ansichtBestellungen, angebote: ansichtAngebote, nachrichten: ansichtNachrichten };
+  const ANSICHTEN = { uebersicht: ansichtUebersicht, teile: ansichtTeile, finanzen: ansichtFinanzen, bestellungen: ansichtBestellungen, angebote: ansichtAngebote, nachrichten: ansichtNachrichten };
   const ansicht = document.getElementById("ansicht");
   function zeichne(fokusId) {
     zeichneNav();
@@ -400,8 +522,14 @@
   }
 
   document.addEventListener("click", (ev) => {
-    const el = ev.target.closest("[data-chip],[data-sort],[data-aktion],[data-setze]");
+    const el = ev.target.closest("[data-chip],[data-sort],[data-aktion],[data-setze],[data-kopiere]");
     if (!el) return;
+    if (el.dataset.kopiere) {
+      const feld = document.getElementById(el.dataset.kopiere);
+      const markiere = () => { feld.focus(); feld.select(); toast("Text markiert – mit Strg+C kopieren"); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(feld.value).then(() => toast("Kopiert"), markiere); else markiere();
+      return;
+    }
     if (el.dataset.setze) { Z[el.dataset.setze] = el.dataset.wert; return; } // Link wechselt danach den Bereich
     if (el.dataset.chip) {
       const w = el.dataset.wert;
@@ -414,6 +542,14 @@
       return zeichne();
     }
     const akt = el.dataset.aktion;
+    if (akt.startsWith("t-")) {
+      const t = Z.teile.find((x) => x.id === el.dataset.id); if (!t) return;
+      const { id, ...daten } = t;
+      if (akt === "t-laden") { Object.keys(Z.entwurf).forEach((k) => { if (k in t) Z.entwurf[k] = t[k]; }); zeichne(); window.scrollTo(0, 0); return toast("In das Formular geladen"); }
+      if (akt === "t-eingestellt") return void teilSchreiben(id, { ...daten, status: "eingestellt" }).then((ok) => ok && toast("Als eingestellt markiert"));
+      if (Z.loeschId !== id) { Z.loeschId = id; return zeichne(); }
+      Z.loeschId = null; return void teilSchreiben(id, null, true).then((ok) => ok && toast("Teil gelöscht"));
+    }
     if (akt === "versendet" || akt === "erstattet") {
       const b = D.bestellungen.find((x) => x.nr === el.dataset.nr);
       b.status = akt === "versendet" ? "versendet" : "zugestellt";
@@ -429,9 +565,26 @@
   document.addEventListener("input", (ev) => {
     if (ev.target.id === "b-suche") { Z.bSuche = ev.target.value; zeichne("b-suche"); }
     if (ev.target.id === "a-suche") { Z.aSuche = ev.target.value; zeichne("a-suche"); }
+    const feld = ev.target.dataset.feld;
+    if (feld) {
+      Z.entwurf[feld] = ev.target.type === "checkbox" ? ev.target.checked : ev.target.value;
+      const v = document.getElementById("vorschau"); if (v) v.innerHTML = vorschauHtml(Z.entwurf);
+    }
+  });
+  document.addEventListener("submit", (ev) => {
+    if (ev.target.id !== "teil-form") return;
+    ev.preventDefault();
+    const e = Z.entwurf;
+    if (!e.titel.trim() || !e.oe.trim()) return toast("Bitte Bezeichnung und OE-Nummer ausfüllen");
+    teilSchreiben("t" + Date.now(), { ...e, status: "erfasst", angelegt: Date.now() }).then((ok) => {
+      if (!ok) return;
+      Object.assign(e, { titel: "", oe: "", km: "", maengel: "", geprueft: false, lagerplatz: "", neupreis: "", preis: "" });
+      toast("Teil gespeichert"); zeichne();
+    });
   });
   window.addEventListener("hashchange", route);
 
   document.getElementById("demo-hinweis").hidden = !D.istDemo;
   route();
+  starteAblage();
 })();
