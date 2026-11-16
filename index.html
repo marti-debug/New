@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Teilehandel Verkäufer-Cockpit</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="seite">
+    <div class="marke">
+      <span class="marke-zeichen" aria-hidden="true"></span>
+      <div>
+        <div class="marke-name">Verkäufer-Cockpit</div>
+        <div class="marke-sub">Kfz-Teile · eBay-Verkauf</div>
+      </div>
+    </div>
+    <nav class="nav" id="nav" aria-label="Bereiche"></nav>
+    <div class="seite-fuss" id="seite-fuss"></div>
+  </aside>
+  <main class="haupt">
+    <div class="demo-hinweis" id="demo-hinweis" hidden>
+      <strong>Beispieldaten.</strong> Das Cockpit ist noch nicht mit Ihrem eBay-Konto verbunden. Alle Zahlen, Käufer und Bestellungen sind erfunden.
+    </div>
+    <div id="ansicht"></div>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
